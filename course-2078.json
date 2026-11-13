@@ -2,8 +2,8 @@
   "schema": 1,
   "courseId": 2078,
   "repository": "LearningOS/2026a-arceos-tasselcanon",
-  "commit": "484b690f2e0b31998eac5620ca1d0f938bf76b19",
-  "score": 100,
+  "commit": "70c9265b7bed5cbf7b9a45b398c0eed41b29ce2b",
+  "score": 200,
   "totalScore": 600,
   "exercises": [
     {
@@ -16,8 +16,8 @@
     {
       "name": "ramfs_rename",
       "max": 100,
-      "score": 0,
-      "status": "fail",
+      "score": 100,
+      "status": "pass",
       "exitCode": 0
     },
     {
@@ -50,9 +50,9 @@
     }
   ],
   "student": "tasselcanon",
-  "runId": "42960579832",
+  "runId": "43406572168",
   "runAttempt": "1",
   "upload": {
-    "status": "accepted"
+    "status": "pending"
   }
 }
