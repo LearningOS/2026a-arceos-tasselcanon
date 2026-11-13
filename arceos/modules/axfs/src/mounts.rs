@@ -1,3 +1,6 @@
+#[cfg(feature = "ramfs")]
+#[path = "ramfs_local.rs"]
+mod local_ramfs;
 use alloc::sync::Arc;
 use axfs_vfs::{VfsNodeType, VfsOps, VfsResult};
 
@@ -17,8 +20,8 @@ pub(crate) fn devfs() -> Arc<fs::devfs::DeviceFileSystem> {
 }
 
 #[cfg(feature = "ramfs")]
-pub(crate) fn ramfs() -> Arc<fs::ramfs::RamFileSystem> {
-    Arc::new(fs::ramfs::RamFileSystem::new())
+pub(crate) fn ramfs() -> Arc<dyn VfsOps> {
+    Arc::new(local_ramfs::RamFileSystem::new())
 }
 
 #[cfg(feature = "procfs")]
