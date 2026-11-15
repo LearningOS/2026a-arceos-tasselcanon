@@ -2,8 +2,8 @@
   "schema": 1,
   "courseId": 2078,
   "repository": "LearningOS/2026a-arceos-tasselcanon",
-  "commit": "5360112a261ee4a146777e8ae10e22c89691b6b6",
-  "score": 400,
+  "commit": "658b05b7666f3ae13dfd3c47aac8bc05d91a64e2",
+  "score": 500,
   "totalScore": 600,
   "exercises": [
     {
@@ -37,8 +37,8 @@
     {
       "name": "sys_map",
       "max": 100,
-      "score": 0,
-      "status": "fail",
+      "score": 100,
+      "status": "pass",
       "exitCode": 0
     },
     {
@@ -50,9 +50,9 @@
     }
   ],
   "student": "tasselcanon",
-  "runId": "43689263195",
+  "runId": "43703230315",
   "runAttempt": "1",
   "upload": {
-    "status": "accepted"
+    "status": "pending"
   }
 }
