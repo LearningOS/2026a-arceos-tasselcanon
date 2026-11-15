@@ -1,13 +1,16 @@
 #![allow(dead_code)]
 
-use core::ffi::{c_void, c_char, c_int};
-use axhal::arch::TrapFrame;
-use axhal::trap::{register_trap_handler, SYSCALL};
+use arceos_posix_api as api;
 use axerrno::LinuxError;
+use axhal::arch::TrapFrame;
+use axhal::mem::PAGE_SIZE_4K;
+use axhal::paging::MappingFlags;
+use axhal::trap::{register_trap_handler, SYSCALL};
+use axstd::fs::File;
 use axtask::current;
 use axtask::TaskExtRef;
-use axhal::paging::MappingFlags;
-use arceos_posix_api as api;
+use core::ffi::{c_char, c_int, c_void};
+use memory_addr::{MemoryAddr, VirtAddr, VirtAddrRange};
 
 const SYS_IOCTL: usize = 29;
 const SYS_OPENAT: usize = 56;
@@ -100,9 +103,14 @@ bitflags::bitflags! {
 fn handle_syscall(tf: &TrapFrame, syscall_num: usize) -> isize {
     ax_println!("handle_syscall [{}] ...", syscall_num);
     let ret = match syscall_num {
-         SYS_IOCTL => sys_ioctl(tf.arg0() as _, tf.arg1() as _, tf.arg2() as _) as _,
+        SYS_IOCTL => sys_ioctl(tf.arg0() as _, tf.arg1() as _, tf.arg2() as _) as _,
         SYS_SET_TID_ADDRESS => sys_set_tid_address(tf.arg0() as _),
-        SYS_OPENAT => sys_openat(tf.arg0() as _, tf.arg1() as _, tf.arg2() as _, tf.arg3() as _),
+        SYS_OPENAT => sys_openat(
+            tf.arg0() as _,
+            tf.arg1() as _,
+            tf.arg2() as _,
+            tf.arg3() as _,
+        ),
         SYS_CLOSE => sys_close(tf.arg0() as _),
         SYS_READ => sys_read(tf.arg0() as _, tf.arg1() as _, tf.arg2() as _),
         SYS_WRITE => sys_write(tf.arg0() as _, tf.arg1() as _, tf.arg2() as _),
@@ -110,11 +118,11 @@ fn handle_syscall(tf: &TrapFrame, syscall_num: usize) -> isize {
         SYS_EXIT_GROUP => {
             ax_println!("[SYS_EXIT_GROUP]: system is exiting ..");
             axtask::exit(tf.arg0() as _)
-        },
+        }
         SYS_EXIT => {
             ax_println!("[SYS_EXIT]: system is exiting ..");
             axtask::exit(tf.arg0() as _)
-        },
+        }
         SYS_MMAP => sys_mmap(
             tf.arg0() as _,
             tf.arg1() as _,
@@ -140,7 +148,75 @@ fn sys_mmap(
     fd: i32,
     _offset: isize,
 ) -> isize {
-    unimplemented!("no sys_mmap!");
+    if length == 0 || length > PAGE_SIZE_4K {
+        return -LinuxError::EINVAL.code() as isize;
+    }
+
+    if flags != MmapFlags::MAP_PRIVATE.bits() || _offset != 0 {
+        return -LinuxError::EINVAL.code() as isize;
+    }
+
+    let map_size = match length.checked_add(PAGE_SIZE_4K - 1) {
+        Some(size) => size / PAGE_SIZE_4K * PAGE_SIZE_4K,
+        None => return -LinuxError::EINVAL.code() as isize,
+    };
+
+    let map_flags: MappingFlags = match MmapProt::from_bits(prot) {
+        Some(prot) => prot,
+        None => return -LinuxError::EINVAL.code() as isize,
+    }
+    .into();
+
+    let file = match api::get_file_like(fd) {
+        Ok(file) => file,
+        Err(err) => return -err.code() as isize,
+    };
+
+    let mut buffer = [0u8; PAGE_SIZE_4K];
+    let buf_len = buffer.len();
+    let mut read_len = 0;
+    while read_len < length {
+        let n = match file.read(&mut buffer[read_len..length]) {
+            Ok(n) => n,
+            Err(err) => return -err.code() as isize,
+        };
+
+        if n == 0 {
+            break;
+        }
+
+        read_len += n;
+    }
+
+    let current_task = axtask::current();
+    let mut task_space_lock = current_task.task_ext().aspace.lock();
+
+    let hint = match addr as usize {
+        0 => VirtAddr::from(PAGE_SIZE_4K),
+        _ => VirtAddr::from(addr as usize),
+    };
+
+    let range_start = VirtAddr::from(PAGE_SIZE_4K);
+    let range_size = task_space_lock.size() - PAGE_SIZE_4K;
+
+    let free_area = match task_space_lock.find_free_area(
+        hint,
+        map_size,
+        VirtAddrRange::from_start_size(range_start, range_size),
+    ) {
+        Some(addr) => addr,
+        None => return -LinuxError::ENOMEM.code() as isize,
+    };
+
+    if let Err(err) = task_space_lock.map_alloc(free_area, map_size, map_flags, true) {
+        return -(LinuxError::from(err).code() as isize);
+    }
+
+    if let Err(err) = task_space_lock.write(free_area, &buffer[..read_len]) {
+        return -(LinuxError::from(err).code() as isize);
+    }
+
+    free_area.as_usize() as isize
 }
 
 fn sys_openat(dfd: c_int, fname: *const c_char, flags: c_int, mode: api::ctypes::mode_t) -> isize {
