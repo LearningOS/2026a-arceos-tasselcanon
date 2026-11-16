@@ -3,29 +3,29 @@
 #![feature(asm_const)]
 #![feature(riscv_ext_intrinsics)]
 
+extern crate alloc;
 #[cfg(feature = "axstd")]
 extern crate axstd as std;
-extern crate alloc;
 #[macro_use]
 extern crate axlog;
 
+mod csrs;
+mod loader;
+mod regs;
+mod sbi;
 mod task;
 mod vcpu;
-mod regs;
-mod csrs;
-mod sbi;
-mod loader;
 
-use vcpu::VmCpuRegisters;
-use riscv::register::{scause, sstatus, stval};
-use csrs::defs::hstatus;
-use tock_registers::LocalRegisterCopy;
-use csrs::{RiscvCsrTrait, CSR};
-use vcpu::_run_guest;
-use sbi::SbiMessage;
-use loader::load_vm_image;
-use axhal::mem::PhysAddr;
 use crate::regs::GprIndex::{A0, A1};
+use axhal::mem::PhysAddr;
+use csrs::defs::hstatus;
+use csrs::{RiscvCsrTrait, CSR};
+use loader::load_vm_image;
+use riscv::register::{scause, sstatus, stval};
+use sbi::SbiMessage;
+use tock_registers::LocalRegisterCopy;
+use vcpu::VmCpuRegisters;
+use vcpu::_run_guest;
 
 const VM_ENTRY: usize = 0x8020_0000;
 
@@ -50,8 +50,7 @@ fn main() {
     prepare_vm_pgtable(ept_root);
 
     // Kick off vm and wait for it to exit.
-    while !run_guest(&mut ctx) {
-    }
+    while !run_guest(&mut ctx) {}
 
     panic!("Hypervisor ok!");
 }
@@ -68,19 +67,38 @@ fn prepare_vm_pgtable(ept_root: PhysAddr) {
 }
 
 fn run_guest(ctx: &mut VmCpuRegisters) -> bool {
+    let irq_was_enabled = axhal::arch::irqs_enabled();
+
+    axhal::arch::disable_irqs();
+
     unsafe {
         _run_guest(ctx);
     }
+    ctx.trap_csrs.scause = scause::read().bits();
+    ctx.trap_csrs.stval = stval::read();
+    let finished = vmexit_handler(ctx);
 
-    vmexit_handler(ctx)
+    if irq_was_enabled {
+        axhal::arch::enable_irqs();
+    }
+
+    finished
 }
-
 #[allow(unreachable_code)]
 fn vmexit_handler(ctx: &mut VmCpuRegisters) -> bool {
-    use scause::{Exception, Trap};
+    use scause::{Exception, Interrupt, Trap};
 
-    let scause = scause::read();
-    match scause.cause() {
+    let scause_bits = ctx.trap_csrs.scause;
+    let interrupt_bit = 1usize << (usize::BITS - 1);
+    let code = scause_bits & !interrupt_bit;
+
+    let trap_cause = if scause_bits & interrupt_bit != 0 {
+        Trap::Interrupt(Interrupt::from(code))
+    } else {
+        Trap::Exception(Exception::from(code))
+    };
+    let trap_value = ctx.trap_csrs.stval;
+    match trap_cause {
         Trap::Exception(Exception::VirtualSupervisorEnvCall) => {
             let sbi_msg = SbiMessage::from_regs(ctx.guest_regs.gprs.a_regs()).ok();
             ax_println!("VmExit Reason: VSuperEcall: {:?}", sbi_msg);
@@ -94,31 +112,50 @@ fn vmexit_handler(ctx: &mut VmCpuRegisters) -> bool {
                         assert_eq!(a1, 0x1234);
                         ax_println!("Shutdown vm normally!");
                         return true;
-                    },
+                    }
                     _ => todo!(),
                 }
             } else {
                 panic!("bad sbi message! ");
             }
-        },
+        }
         Trap::Exception(Exception::IllegalInstruction) => {
-            panic!("Bad instruction: {:#x} sepc: {:#x}",
-                stval::read(),
-                ctx.guest_regs.sepc
-            );
-        },
+            ax_println!("\x1b[94mTo this line: 104 \x1b[0m");
+            if trap_value == 0xf14025f3 {
+                ctx.guest_regs.gprs.set_reg(regs::GprIndex::A1, 0x1234);
+                ctx.guest_regs.sepc += 4
+            } else {
+                panic!(
+                    "Bad instruction: {:#x} sepc: {:#x}",
+                    trap_value, ctx.guest_regs.sepc
+                );
+            }
+        }
         Trap::Exception(Exception::LoadGuestPageFault) => {
-            panic!("LoadGuestPageFault: stval{:#x} sepc: {:#x}",
-                stval::read(),
-                ctx.guest_regs.sepc
-            );
-        },
+            if trap_value == 0x40 && ctx.guest_regs.sepc == VM_ENTRY + 4 {
+                ctx.guest_regs.gprs.set_reg(regs::GprIndex::A0, 0x6688);
+                ctx.guest_regs.sepc += 4;
+            } else {
+                panic!(
+                    "LoadGuestPageFault: stval{:#x} sepc: {:#x}",
+                    trap_value, ctx.guest_regs.sepc
+                );
+            }
+        }
+        Trap::Interrupt(Interrupt::SupervisorTimer) => {
+            ax_println!("[debug] handling host timer interrupt");
+            let handler = match axhal::trap::IRQ.first() {
+                Some(&handler) => handler,
+                None => panic!("No Interrupt Handler"),
+            };
+            if let false = handler(scause_bits) {
+                panic!("Handle Interrupt Handler Error");
+            }
+        }
         _ => {
             panic!(
                 "Unhandled trap: {:?}, sepc: {:#x}, stval: {:#x}",
-                scause.cause(),
-                ctx.guest_regs.sepc,
-                stval::read()
+                trap_cause, ctx.guest_regs.sepc, trap_value
             );
         }
     }
@@ -127,9 +164,8 @@ fn vmexit_handler(ctx: &mut VmCpuRegisters) -> bool {
 
 fn prepare_guest_context(ctx: &mut VmCpuRegisters) {
     // Set hstatus
-    let mut hstatus = LocalRegisterCopy::<usize, hstatus::Register>::new(
-        riscv::register::hstatus::read().bits(),
-    );
+    let mut hstatus =
+        LocalRegisterCopy::<usize, hstatus::Register>::new(riscv::register::hstatus::read().bits());
     // Set Guest bit in order to return to guest mode.
     hstatus.modify(hstatus::spv::Guest);
     // Set SPVP bit in order to accessing VS-mode memory from HS-mode.
@@ -140,6 +176,7 @@ fn prepare_guest_context(ctx: &mut VmCpuRegisters) {
     // Set sstatus in guest mode.
     let mut sstatus = sstatus::read();
     sstatus.set_spp(sstatus::SPP::Supervisor);
+    sstatus.set_sie(false);
     ctx.guest_regs.sstatus = sstatus.bits();
     // Return to entry to start vm.
     ctx.guest_regs.sepc = VM_ENTRY;
