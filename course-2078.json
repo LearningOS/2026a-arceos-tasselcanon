@@ -2,7 +2,7 @@
   "schema": 1,
   "courseId": 2078,
   "repository": "LearningOS/2026a-arceos-tasselcanon",
-  "commit": "ba5302fce389c4a186cbbd71edc764809d889965",
+  "commit": "7d44a949169fdd6dd49c30552885cb7a122572ec",
   "score": 600,
   "totalScore": 600,
   "exercises": [
@@ -50,9 +50,9 @@
     }
   ],
   "student": "tasselcanon",
-  "runId": "45964872285",
+  "runId": "45977138604",
   "runAttempt": "1",
   "upload": {
-    "status": "accepted"
+    "status": "pending"
   }
 }
