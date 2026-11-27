@@ -78,9 +78,9 @@ impl DirNode {
         if src == dst {
             return Ok(());
         }
-        if children.get(dst).is_some() {
-            return Err(VfsError::AlreadyExists);
-        }
+        // if children.get(dst).is_some() {
+        //     return Err(VfsError::AlreadyExists);
+        // }
         let node = children.remove(src).ok_or(VfsError::NotFound)?;
         children.insert(dst.into(), node);
         Ok(())

@@ -310,9 +310,19 @@ pub(crate) fn set_current_dir(path: &str) -> AxResult {
 }
 
 pub(crate) fn rename(old: &str, new: &str) -> AxResult {
-    if parent_node_of(None, new).lookup(new).is_ok() {
-        warn!("dst file already exist, now remove it");
-        remove_file(None, new)?;
+    match (
+        parent_node_of(None, old).lookup(old),
+        parent_node_of(None, new).lookup(new),
+    ) {
+        (Err(e), _) => return Err(e),
+        (Ok(old_node), Ok(new_node)) => {
+            let (old_attr, new_attr) = (old_node.get_attr()?, new_node.get_attr()?);
+            if old_attr.is_dir() || new_attr.is_dir() {
+                return Err(AxError::BadFileDescriptor);
+            }
+        }
+        _ => {}
     }
+
     parent_node_of(None, old).rename(old, new)
 }
