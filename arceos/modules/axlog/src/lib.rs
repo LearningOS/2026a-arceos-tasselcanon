@@ -50,7 +50,7 @@
 
 extern crate log;
 
-use core::fmt::{self, Write};
+use core::fmt::{self, Display, Write};
 use core::str::FromStr;
 
 use log::{Level, LevelFilter, Log, Metadata, Record};
@@ -105,6 +105,21 @@ enum ColorCode {
     BrightMagenta = 95,
     BrightCyan = 96,
     BrightWhite = 97,
+}
+
+pub fn println_with_color<T>(color: &str, text: T)
+where
+    T: Display,
+{
+    let code: u8 = match color {
+        "Black" => 30,
+        "Red" => 31,
+        "Green" => 32,
+        "Yellow" => 33,
+        "Blue" => 34,
+        _ => 37,
+    };
+    ax_println!("\x1b[{}m{}\x1b[0m", code, text);
 }
 
 /// Extern interfaces that must be implemented in other crates.
