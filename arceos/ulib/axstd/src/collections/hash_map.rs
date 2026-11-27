@@ -68,4 +68,60 @@ impl<K, V> HashMap<K, V> {
             .flat_map(|bucket| bucket.iter())
             .map(|(key, value)| (key, value))
     }
+
+    pub fn get(&self, key: &K) -> Option<&V>
+    where
+        K: Hash + Eq,
+    {
+        let mut hasher = SimpleHasher::new();
+        key.hash(&mut hasher);
+        let hash = hasher.finish();
+        let index = hash as usize % self.buckets.len();
+        for (k, v) in self.buckets[index].iter() {
+            if k == key {
+                return Some(v);
+            }
+        }
+        None
+    }
+
+    pub fn get_mut(&mut self, key: &K) -> Option<&mut V>
+    where
+        K: Hash + Eq,
+    {
+        let mut hasher = SimpleHasher::new();
+        key.hash(&mut hasher);
+        let hash = hasher.finish();
+        let index = hash as usize % self.buckets.len();
+        for (k, v) in self.buckets[index].iter_mut() {
+            if *k == *key {
+                return Some(v);
+            }
+        }
+        None
+    }
+
+    pub fn remove(&mut self, key: &K) -> Option<V>
+    where
+        K: Hash + Eq,
+    {
+        let mut hasher = SimpleHasher::new();
+        key.hash(&mut hasher);
+        let hash = hasher.finish();
+        let index = hash as usize % self.buckets.len();
+        let mut idx = 0;
+        let idx = self.buckets[index].iter().position(|(k, _)| k == key)?;
+
+        let (old_k, old_v) = self.buckets[index].remove(idx);
+        self.size -= 1;
+        Some(old_v)
+    }
+
+    pub fn len(&self) -> usize {
+        self.size
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.size == 0
+    }
 }
