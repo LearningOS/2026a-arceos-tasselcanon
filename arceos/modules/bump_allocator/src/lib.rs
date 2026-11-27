@@ -59,7 +59,21 @@ impl<const SIZE: usize> BaseAllocator for EarlyAllocator<SIZE> {
     }
 
     fn add_memory(&mut self, start: usize, size: usize) -> allocator::AllocResult {
-        todo!("暂未实现添加内存区域")
+        if self.start >= self.end || start != self.end || size == 0 {
+            return Err(allocator::AllocError::InvalidParam);
+        }
+        if self.p_pos != self.end {
+            return Err(allocator::AllocError::InvalidParam);
+        }
+        let new_end = match self.end.checked_add(size) {
+            Some(end) => end,
+            None => {
+                return Err(allocator::AllocError::MemoryOverlap);
+            }
+        };
+        self.end = new_end;
+        self.p_pos = new_end;
+        Ok(())
     }
 }
 
@@ -149,5 +163,36 @@ impl<const SIZE: usize> PageAllocator for EarlyAllocator<SIZE> {
 
     fn available_pages(&self) -> usize {
         (self.p_pos - self.b_pos) / SIZE
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::EarlyAllocator;
+    use allocator::{BaseAllocator, ByteAllocator, PageAllocator};
+
+    const PAGE: usize = 0x1000;
+
+    #[test]
+    fn add_adjacent_memory() {
+        let mut allocator = EarlyAllocator::<PAGE>::new();
+        allocator.init(0x1000, 2 * PAGE);
+
+        allocator.add_memory(0x3000, PAGE).unwrap();
+
+        assert_eq!(allocator.available_bytes(), 3 * PAGE);
+        assert_eq!(allocator.alloc_pages(1, PAGE).unwrap(), 0x3000);
+    }
+
+    #[test]
+    fn reject_extension_after_allocating_a_page() {
+        let mut allocator = EarlyAllocator::<PAGE>::new();
+        allocator.init(0x1000, 2 * PAGE);
+        assert_eq!(allocator.alloc_pages(1, PAGE).unwrap(), 0x2000);
+
+        let available = allocator.available_bytes();
+        assert!(allocator.add_memory(0x3000, PAGE).is_err());
+        assert_eq!(allocator.available_bytes(), available);
+        assert_eq!(allocator.total_bytes(), 2 * PAGE);
     }
 }
