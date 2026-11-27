@@ -9,6 +9,28 @@ use axsync::Mutex;
 use super::fd_ops::{get_file_like, FileLike};
 use crate::{ctypes, utils::char_ptr_to_str};
 
+pub fn read_by_pos(fd: c_int, offset: u64, buf: &mut [u8]) -> LinuxResult<usize> {
+    let file = match File::from_fd(fd) {
+        Ok(f) => f.clone(),
+        Err(e) => return Err(e),
+    };
+    let mut read_len = 0;
+    while read_len < buf.len() {
+        let n = file
+            .inner
+            .lock()
+            .read_at(offset + read_len as u64, &mut buf[read_len..])?;
+
+        if n == 0 {
+            break;
+        }
+
+        read_len += n;
+    }
+
+    Ok(read_len)
+}
+
 pub struct File {
     inner: Mutex<axfs::fops::File>,
 }

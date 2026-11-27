@@ -173,21 +173,10 @@ fn sys_mmap(
     };
 
     let mut buffer = [0u8; PAGE_SIZE_4K];
-    let buf_len = buffer.len();
-    let mut read_len = 0;
-    while read_len < length {
-        let n = match file.read(&mut buffer[read_len..length]) {
-            Ok(n) => n,
-            Err(err) => return -err.code() as isize,
-        };
-
-        if n == 0 {
-            break;
-        }
-
-        read_len += n;
-    }
-
+    let read_len = match api::read_by_pos(fd, 0, &mut buffer[..length]) {
+        Ok(n) => n,
+        Err(err) => return -(err.code() as isize),
+    };
     let current_task = axtask::current();
     let mut task_space_lock = current_task.task_ext().aspace.lock();
 
